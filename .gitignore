@@ -21,4 +21,4 @@ Temporary Items
 .Trash-*
 .nfs*
 /dist
-node_modules/
+/node_modules
