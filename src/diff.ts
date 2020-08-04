@@ -1,45 +1,84 @@
 const cv = require('opencv4nodejs');
 
-const devicePort = 0;
-const wCap = new cv.VideoCapture(devicePort);
+const vision = require('@google-cloud/vision');
+const client = new vision.ImageAnnotatorClient();
 
-const delay = 100;  //フレームレート(ms)
-let done = false;
+const admin = require('firebase-admin');
+const serviceAccount = require('/app/device/mojii-285301-b391b0b45469.json');
+admin.initializeApp({credential: admin.credential.cert(serviceAccount)});
+const db = admin.firestore();
+const docRef = db.collection('docs').doc('demo1');
 
-let frame = wCap.read();
-let binFrame = frame.bgrToGray().threshold(100, 255, 0);  //二値化の閾値
-let preFrame = binFrame;
+async function main() {
+  const devicePort = 0;
+  const wCap = new cv.VideoCapture(devicePort);
 
-let count = 0;
-let stilled = false;
+  const delay = 100;  //フレームレート(ms)
+  let done = false;
 
-while (!done) {
-  frame = wCap.read();
+  let frame = wCap.read();
+  let binaryFrame = frame.bgrToGray().threshold(100, 255, 0);  //二値化の閾値
+  let prevFrame = binaryFrame;
+  let sentFrame = binaryFrame;
 
-  if (frame.empty) {
-    wCap.reset();
+  let count = 0;
+  let isStatic = false;
+
+  while (!done) {
     frame = wCap.read();
+
+    if (frame.empty) {
+      wCap.reset();
+      frame = wCap.read();
+    }
+
+    binaryFrame = frame.bgrToGray().threshold(100, 255, 0);
+
+    count = diffFrame(binaryFrame, prevFrame) != 0 ? 0 : count + 1;
+    count = count > 10 ? 10 : count;
+    isStatic = count == 0 ? false : isStatic;
+
+    if (!isStatic && count == 10) {
+      isStatic = true;
+
+      if (diffFrame(binaryFrame, sentFrame) != 0) {
+        console.log('sent in ' + new Date());
+
+        const base64 =  cv.imencode('.jpg', frame).toString('base64');
+        const request = {
+          image: {
+            content: base64,
+          }
+        };
+
+        const [result] = await client.textDetection(request);
+        const detections = result.textAnnotations;
+
+        if (detections.length != 0) {
+          //console.log(detections[0].description);
+          let result = await docRef.set({
+            text: detections[0].description,
+          });
+        }
+
+        sentFrame = binaryFrame;
+      }
+    }
+
+    cv.imshow('diff', frame);
+
+    prevFrame = binaryFrame;
+    const key = cv.waitKey(delay);
+    done = key !== -1;
   }
-
-  binFrame = frame.bgrToGray().threshold(100, 255, 0);
-
-  let contours = binFrame.absdiff(preFrame).findContours(0, 1);
-  let rectangles = contours.map((contour: any) => contour.boundingRect());
-  let differences = rectangles.filter((rectangle: any) => rectangle.width > 100);
-
-  count = differences.length != 0 ? 0 : count + 1;
-  count = count > 10 ? 10 : count;
-  stilled = count == 0 ? false : stilled;
-
-  if (!stilled && count == 10) {
-    stilled = true;
-    console.log('stilled in ' + new Date());
-  }
-
-  cv.imshow('diff', frame);
-
-  preFrame = binFrame;
-
-  const key = cv.waitKey(delay);
-  done = key !== -1;
 }
+
+function diffFrame(frame1: any, frame2: any) {
+  let contours = frame1.absdiff(frame2).findContours(0, 1);
+  let rectangles = contours.map((contour: any) => contour.boundingRect());
+  let differences = rectangles.filter((rectangle: any) => rectangle.width > 100); //小さい差分のフィルタリング
+
+  return differences.length;
+}
+
+main();

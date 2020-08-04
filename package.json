@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
+    "@google-cloud/vision": "^2.1.1",
     "@types/node": "^14.0.24",
+    "firebase-admin": "^9.0.0",
     "opencv4nodejs": "^5.6.0",
     "typescript": "^3.9.7"
   },
